@@ -3,9 +3,9 @@ name: "Prof. Zhandong Liu"
 role: "Principal Investigator"
 title: ["Principal Investigator", "Chief of Computational Sciences", "The Ting Tsung and Wei Fong Chao Endowed Chair"]
 avatar: "../../assets/zhandong-liu.jpg"
-bio: "Professor of Computer Science, Advancing Human-AI Interaction, Ethical AI & Computational Genomics"
-email: "sarah.johnson@university.edu"
-linkedin: "https://linkedin.com"
+bio: "Associate Professor, Advancing Human-AI Interaction, Ethical AI & Computational Genomics"
+email: "zhandonl@bcm.edu"
+linkedin: "https://www.linkedin.com/in/zhandong/"
 github: "https://github.com/LiuzLab"
 googleScholar: "https://scholar.google.com/citations?user=O2ar4aIAAAAJ&hl=en"
 weight: 1
