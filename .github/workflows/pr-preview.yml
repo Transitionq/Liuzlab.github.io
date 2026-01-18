@@ -55,6 +55,8 @@ jobs:
             const repo = context.repo;
             
             // Helper function to find and update/create bot comment
+            // Note: This function is duplicated in the error reporting step below
+            // because GitHub Actions inline scripts are isolated and don't share scope
             const postOrUpdateComment = async (github, repo, prNumber, commentBody) => {
               const { data: comments } = await github.rest.issues.listComments({
                 owner: repo.owner,
@@ -129,7 +131,8 @@ jobs:
               }
             }
             
-            // Truncate log if too long (GitHub comment limit is 65536 characters)
+            // Truncate log if too long
+            // GitHub comment limit is 65536 characters, using 60000 to leave room for markdown formatting and error message wrapper
             const maxLogLength = 60000;
             if (errorLog.length > maxLogLength) {
               const truncated = errorLog.length - maxLogLength;
@@ -155,6 +158,7 @@ jobs:
             Please fix the errors and push your changes to trigger a new build.`;
             
             // Helper function to find and update/create bot comment
+            // Note: Duplicated from success step above - GitHub Actions inline scripts don't share scope
             const postOrUpdateComment = async (github, repo, prNumber, commentBody) => {
               const { data: comments } = await github.rest.issues.listComments({
                 owner: repo.owner,
