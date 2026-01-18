@@ -1,0 +1,94 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getCollection } from 'astro:content';
+import { Users } from 'lucide-react';
+
+const alumni = await getCollection('alumni');
+---
+
+<Layout title="Alumni">
+  <div class="max-w-7xl mx-auto px-4 py-12 sm:py-20">
+    <div class="max-w-3xl mx-auto text-center mb-16">
+      <h1 class="text-4xl font-bold text-gray-900 mb-4" data-i18n-key="alumni.title">Alumni</h1>
+      <p class="text-lg text-gray-600" data-i18n-key="alumni.subtitle">
+        Former members of our lab and their current positions.
+      </p>
+    </div>
+
+    <div class="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+      {alumni.length > 0 ? (
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-900" data-i18n-key="alumni.name">Name</th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-900" data-i18n-key="alumni.previousPosition">Previous Position</th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-900" data-i18n-key="alumni.years">Years</th>
+                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-900" data-i18n-key="alumni.currentPosition">Current Position</th>
+                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-900" data-i18n-key="alumni.link">Link</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              {alumni.map(person => (
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                    {person.data.name}
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600">
+                    {person.data.previousPosition}
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600">
+                    {person.data.years}
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600">
+                    {person.data.currentPosition}
+                  </td>
+                  <td class="px-6 py-4 text-center">
+                    {person.data.link && (
+                      <a 
+                        href={person.data.link} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center justify-center p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        aria-label={`${person.data.linkType || 'Link'} for ${person.data.name}`}
+                        title={`${person.data.linkType || 'Link'} for ${person.data.name}`}
+                      >
+                        {person.data.linkType === 'linkedin' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path>
+                            <rect x="2" y="9" width="4" height="12"></rect>
+                            <circle cx="4" cy="4" r="2"></circle>
+                          </svg>
+                        ) : person.data.linkType === 'github' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M2 12h20"></path>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                          </svg>
+                        )}
+                      </a>
+                    )}
+                    {!person.data.link && (
+                      <span class="text-gray-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div class="text-center py-12 px-4">
+          <div class="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4">
+            <Users className="w-8 h-8 text-gray-400" />
+          </div>
+          <p class="text-gray-500" data-i18n-key="alumni.noAlumni">No alumni listed yet.</p>
+        </div>
+      )}
+    </div>
+  </div>
+</Layout>

@@ -148,6 +148,18 @@ const activities = defineCollection({
   }),
 });
 
+const alumni = defineCollection({
+  loader: glob({ pattern: "**/*.{md,mdx}", base: "./src/content/alumni" }),
+  schema: z.object({
+    name: z.string(),
+    previousPosition: z.string(),
+    years: z.string(),
+    currentPosition: z.string(),
+    link: z.string().optional(),
+    linkType: z.enum(['linkedin', 'github', 'website']).optional(),
+  }),
+});
+
 export const collections = {
   publications,
   books,
@@ -158,4 +170,5 @@ export const collections = {
   softwares,
   honors,
   activities,
+  alumni,
 };

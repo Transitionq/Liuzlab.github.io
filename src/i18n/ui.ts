@@ -16,6 +16,7 @@ export const ui = {
     'nav.join': 'Join Us',
     'nav.news': 'News',
     'nav.search': 'Search',
+    'nav.alumni': 'Alumni',
     
     'search.subtitle': 'Search through our publications, news, and team members.',
     
@@ -94,6 +95,15 @@ export const ui = {
     'team.alumni': 'Alumni',
     'team.former': 'Former Member',
     'team.noMembers': 'No team members found.',
+
+    'alumni.title': 'Alumni',
+    'alumni.subtitle': 'Former members of our lab and their current positions.',
+    'alumni.name': 'Name',
+    'alumni.previousPosition': 'Previous Position',
+    'alumni.years': 'Years',
+    'alumni.currentPosition': 'Current Position',
+    'alumni.link': 'Link',
+    'alumni.noAlumni': 'No alumni listed yet.',
 
     'footer.rights': 'All rights reserved.',
     'footer.powered': 'Powered by',
