@@ -1,7 +1,6 @@
 ---
 name: "Cole Deisseroth"
-role: "Graduate student"
-title: ["Graduate student"]
+role: "PhD Student"
 avatar: "../../assets/cole-deisseroth.jpg"
 bio: "Studies pharmacogenomics via publicly available databases."
 email: "deissero@bcm.edu"
