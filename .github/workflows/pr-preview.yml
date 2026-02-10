@@ -1,108 +1,211 @@
-name: PR Preview Build and Deploy
+name: PR Sanity Check
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
     branches: [ main ]
 
 permissions:
   contents: read
   pull-requests: write
-  id-token: write
 
 jobs:
-  build:
+  sanity-check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout base branch
         uses: actions/checkout@v4
-      
-      - name: Setup Node
-        uses: actions/setup-node@v4
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-      
-      - name: Install dependencies
-        id: install
-        run: |
-          npm ci 2>&1 | tee install.log
-        continue-on-error: true
-      
-      - name: Build with Astro
-        id: build
-        if: steps.install.outcome == 'success'
-        run: |
-          npm run build 2>&1 | tee build.log
-        continue-on-error: true
-      
-      - name: Upload build artifact
-        if: steps.build.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr-preview-${{ github.event.pull_request.number }}
-          path: ./dist
-          retention-days: 7
-      
-      - name: Post success comment
-        if: steps.build.outcome == 'success'
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
+
+      - name: Get changed files
+        id: changed-files
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = context.payload.pull_request.number;
-            const runId = context.runId;
-            const repo = context.repo;
-            
-            // Helper function to find and update/create bot comment
-            // Note: This function is duplicated in the error reporting step below
-            // because GitHub Actions inline scripts are isolated and don't share scope
-            const postOrUpdateComment = async (github, repo, prNumber, commentBody) => {
-              const { data: comments } = await github.rest.issues.listComments({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: prNumber,
-              });
-              
-              const botComment = comments.find(comment => 
-                comment.user.type === 'Bot' && 
-                (comment.body.includes('Build Successful') || comment.body.includes('Build Failed'))
-              );
-              
-              if (botComment) {
-                await github.rest.issues.updateComment({
-                  owner: repo.owner,
-                  repo: repo.repo,
-                  comment_id: botComment.id,
-                  body: commentBody
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: repo.owner,
-                  repo: repo.repo,
-                  issue_number: prNumber,
-                  body: commentBody
-                });
-              }
-            };
-            
-            const comment = `✅ **Build Successful!**
-            
-            Your PR has been successfully built and is ready for preview.
-            
-            📦 **Artifact:** \`pr-preview-${prNumber}\`
-            🔗 **Workflow Run:** [View Details](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
-            
-            The build artifact is available for 7 days and can be downloaded from the workflow run.`;
-            
-            await postOrUpdateComment(github, repo, prNumber, comment);
-      
-      - name: Extract and post error logs
-        if: steps.install.outcome == 'failure' || steps.build.outcome == 'failure'
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const filenames = files.map(f => f.filename);
+            core.setOutput('files', JSON.stringify(filenames));
+            core.info(`Changed files: ${filenames.join(', ')}`);
+
+      - name: Run sanity checks
+        id: sanity
+        shell: bash
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+        run: |
+          errors=""
+          warnings=""
+          checked=0
+
+          cd pr-head
+
+          for file in $(echo "$CHANGED_FILES" | jq -r '.[]'); do
+            # --------------------------------------------------
+            # Check 1: Markdown frontmatter has closing delimiter
+            # --------------------------------------------------
+            if [[ "$file" == src/content/*.md || "$file" == src/content/*.mdx ]]; then
+              checked=$((checked + 1))
+              if [ ! -f "$file" ]; then
+                # File was deleted in the PR – nothing to validate
+                continue
+              fi
+
+              # Verify the file starts with --- and has a closing ---
+              if ! head -1 "$file" | grep -q '^---'; then
+                errors="${errors}❌ \`${file}\`: Missing frontmatter delimiter (\`---\`) at start of file.\n"
+                continue
+              fi
+              # Count --- lines; need at least 2 for valid frontmatter
+              delimiter_count=$(grep -c '^---$' "$file" || true)
+              if [ "$delimiter_count" -lt 2 ]; then
+                errors="${errors}❌ \`${file}\`: Frontmatter is not properly closed (missing closing \`---\`).\n"
+                continue
+              fi
+
+              # Extract frontmatter (between first and second ---)
+              frontmatter=$(sed -n '/^---$/,/^---$/p' "$file" | sed '1d;$d')
+
+              # --------------------------------------------------
+              # Check 2: Required fields per collection
+              # --------------------------------------------------
+              dir=$(dirname "$file")
+              collection=$(echo "$dir" | sed 's|src/content/||' | cut -d'/' -f1)
+
+              case "$collection" in
+                team)
+                  for field in name role avatar; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  # Validate role value
+                  if echo "$frontmatter" | grep -q '^role:'; then
+                    role_value=$(echo "$frontmatter" | grep '^role:' | sed 's/^role: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')
+                    valid_roles="Principal Investigator|Professor|Associate Professor|Assistant Professor|Postdoc|Research Assistant|PhD Student|Master Student|Undergraduate|Alumni"
+                    if ! echo "$role_value" | grep -qE "^(${valid_roles})$"; then
+                      errors="${errors}❌ \`${file}\`: Invalid role \`${role_value}\`. Must be one of: ${valid_roles//|/, }.\n"
+                    fi
+                  fi
+                  ;;
+                publications|books)
+                  for field in title authors year venue; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                news)
+                  for field in title date; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                research)
+                  for field in title description; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                softwares)
+                  for field in title developers link date; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                grants)
+                  for field in title pis number startDate endDate status; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                honors)
+                  for field in title award date year type members; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                activities)
+                  for field in title date; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+                alumni)
+                  for field in name previousPosition years currentPosition; do
+                    if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                      errors="${errors}❌ \`${file}\`: Missing required field \`${field}\` in frontmatter.\n"
+                    fi
+                  done
+                  ;;
+              esac
+
+              # --------------------------------------------------
+              # Check 3: Image references exist
+              # --------------------------------------------------
+              image_refs=$(echo "$frontmatter" | grep -oE '("|'"'"'|)\.\./(\.\./)?assets/[^"'"'"'[:space:]]+("|'"'"'|)' | tr -d "\"'" || true)
+              if [ -n "$image_refs" ]; then
+                while IFS= read -r img_ref; do
+                  # Resolve relative to the markdown file's directory
+                  img_path=$(cd "$(dirname "$file")" && realpath -m "$img_ref" 2>/dev/null || echo "")
+                  if [ -z "$img_path" ] || [ ! -f "$img_path" ]; then
+                    errors="${errors}❌ \`${file}\`: Referenced image \`${img_ref}\` does not exist.\n"
+                  fi
+                done <<< "$image_refs"
+              fi
+            fi
+
+            # --------------------------------------------------
+            # Check 4: Image files are valid
+            # --------------------------------------------------
+            if [[ "$file" == src/assets/*.jpg || "$file" == src/assets/*.jpeg || "$file" == src/assets/*.png || "$file" == src/assets/*.gif || "$file" == src/assets/*.webp || "$file" == src/assets/*.svg ]]; then
+              checked=$((checked + 1))
+              if [ -f "$file" ]; then
+                filesize=$(stat -c%s "$file" 2>/dev/null || echo 0)
+                # Warn if image is larger than 2MB
+                if [ "$filesize" -gt 2097152 ]; then
+                  warnings="${warnings}⚠️ \`${file}\`: Image is $(( filesize / 1048576 ))MB. Consider compressing to under 2MB for faster page loads.\n"
+                fi
+              fi
+            fi
+          done
+
+          # Write outputs
+          echo "checked=$checked" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$errors" ]; then
+            # Write errors to a file to preserve newlines
+            printf '%b' "$errors" > /tmp/sanity-errors.txt
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          elif [ -n "$warnings" ]; then
+            printf '%b' "$warnings" > /tmp/sanity-warnings.txt
+            echo "status=warning" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post sanity check results
+        if: always()
         uses: actions/github-script@v7
         env:
-          INSTALL_OUTCOME: ${{ steps.install.outcome }}
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CHECK_STATUS: ${{ steps.sanity.outputs.status }}
+          CHECKED_COUNT: ${{ steps.sanity.outputs.checked }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -110,88 +213,83 @@ jobs:
             const prNumber = context.payload.pull_request.number;
             const runId = context.runId;
             const repo = context.repo;
-            
-            let errorLog = '';
-            let failedStep = '';
-            
-            // Check which step failed and read the appropriate log
-            if (process.env.INSTALL_OUTCOME === 'failure') {
-              failedStep = 'Installation';
+            const status = process.env.CHECK_STATUS || 'success';
+            const checked = process.env.CHECKED_COUNT || '0';
+
+            let comment = '';
+
+            if (status === 'failure') {
+              let errors = '';
               try {
-                errorLog = fs.readFileSync('install.log', 'utf8');
+                errors = fs.readFileSync('/tmp/sanity-errors.txt', 'utf8');
               } catch (e) {
-                errorLog = 'Could not read installation log file.';
+                errors = 'Could not read error details.';
               }
-            } else if (process.env.BUILD_OUTCOME === 'failure') {
-              failedStep = 'Build';
+              comment = `❌ **Sanity Check Failed**
+
+            The following issues were found in your PR:
+
+            ${errors}
+
+            🔗 **Workflow Run:** [View Details](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
+
+            Please fix the errors above and push your changes.`;
+            } else if (status === 'warning') {
+              let warnings = '';
               try {
-                errorLog = fs.readFileSync('build.log', 'utf8');
+                warnings = fs.readFileSync('/tmp/sanity-warnings.txt', 'utf8');
               } catch (e) {
-                errorLog = 'Could not read build log file.';
+                warnings = '';
               }
+              comment = `✅ **Sanity Check Passed** (with warnings)
+
+            All ${checked} checked file(s) passed validation.
+
+            ${warnings}
+
+            🔗 **Workflow Run:** [View Details](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})`;
+            } else {
+              comment = `✅ **Sanity Check Passed**
+
+            All ${checked} checked file(s) passed validation.
+
+            🔗 **Workflow Run:** [View Details](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})`;
             }
-            
-            // Truncate log if too long
-            // GitHub comment limit is 65536 characters, using 60000 to leave room for markdown formatting and error message wrapper
-            const maxLogLength = 60000;
-            if (errorLog.length > maxLogLength) {
-              const truncated = errorLog.length - maxLogLength;
-              errorLog = errorLog.slice(-maxLogLength);
-              errorLog = `... (truncated ${truncated} characters)\n\n` + errorLog;
-            }
-            
-            const comment = `❌ **Build Failed - ${failedStep} Error**
-            
-            The ${failedStep.toLowerCase()} step failed for this PR. Please review the error log below:
-            
-            <details>
-            <summary>📋 Click to view error log</summary>
-            
-            \`\`\`
-            ${errorLog}
-            \`\`\`
-            
-            </details>
-            
-            🔗 **Workflow Run:** [View Full Details](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
-            
-            Please fix the errors and push your changes to trigger a new build.`;
-            
-            // Helper function to find and update/create bot comment
-            // Note: Duplicated from success step above - GitHub Actions inline scripts don't share scope
-            const postOrUpdateComment = async (github, repo, prNumber, commentBody) => {
+
+            // Find and update or create bot comment
+            try {
               const { data: comments } = await github.rest.issues.listComments({
                 owner: repo.owner,
                 repo: repo.repo,
                 issue_number: prNumber,
               });
-              
-              const botComment = comments.find(comment => 
-                comment.user.type === 'Bot' && 
-                (comment.body.includes('Build Successful') || comment.body.includes('Build Failed'))
+
+              const botComment = comments.find(c =>
+                c.user.type === 'Bot' &&
+                (c.body.includes('Sanity Check Passed') || c.body.includes('Sanity Check Failed'))
               );
-              
+
               if (botComment) {
                 await github.rest.issues.updateComment({
                   owner: repo.owner,
                   repo: repo.repo,
                   comment_id: botComment.id,
-                  body: commentBody
+                  body: comment
                 });
               } else {
                 await github.rest.issues.createComment({
                   owner: repo.owner,
                   repo: repo.repo,
                   issue_number: prNumber,
-                  body: commentBody
+                  body: comment
                 });
               }
-            };
-            
-            await postOrUpdateComment(github, repo, prNumber, comment);
-      
-      - name: Fail the workflow if build failed
-        if: steps.install.outcome == 'failure' || steps.build.outcome == 'failure'
+            } catch (e) {
+              core.warning(`Could not post PR comment: ${e.message}`);
+            }
+
+      - name: Fail if sanity checks failed
+        if: steps.sanity.outputs.status == 'failure'
         run: |
-          echo "Build or installation failed. Check the PR comment for details."
+          echo "Sanity checks failed. See the PR comment or workflow log for details."
           exit 1
